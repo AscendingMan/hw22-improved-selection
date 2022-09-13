@@ -41,20 +41,17 @@ public class SelectionBase : MonoBehaviour
 
     private void HierarchyWindowItemOnGUI(int instanceID, Rect selectionRect)
     {
-        // Not working
-        // if (m_HoverState.m_HoveredParentObject && instanceID == m_HoverState.m_HoveredParentObject.GetInstanceID() && !m_IsInContext)
-        // {
-        //     Color32 color = EditorColors.GetDefaultBackgroundColor(EditorUtils.IsHierarchyFocused, true);
-        //     EditorGUI.DrawRect(selectionRect, color);
-        //     
-        //     color = EditorColors.GetDefaultTextColor(EditorUtils.IsHierarchyFocused, true);
-        //     GUIStyle labelGUIStyle = new GUIStyle
-        //     {
-        //         normal = new GUIStyleState { textColor = color },
-        //     };
-        //     
-        //     EditorGUI.LabelField(selectionRect, m_HoverState.m_HoveredParentObject.name, labelGUIStyle);
-        // }
+        if (!selectionRect.Contains(Event.current.mousePosition))
+            return;
+                
+        var go = EditorUtility.InstanceIDToObject(instanceID) as GameObject;
+        if (!go)
+            return;
+
+        if (go.transform.parent != null)
+            m_HoverState.m_HoveredChildObject = go;
+        else
+            m_HoverState.m_HoveredObjects = new List<GameObject>(){go};
     }
 
     void OnSelectionChanged()
