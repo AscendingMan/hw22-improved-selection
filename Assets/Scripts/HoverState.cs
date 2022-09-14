@@ -9,12 +9,10 @@ public class HoverState
     public GameObject m_HoveredParentObject;
     public GameObject m_HoveredChildObject;
     public GameObject m_HoveredSibilingObject;
-    public bool m_IsContext;
 
     public void Clear()
     {
         m_HoveredObjects?.Clear();
-        m_SibilingObjects?.Clear();
         m_HoveredParentObject = null;
         m_HoveredChildObject = null;
         m_HoveredSibilingObject = null;

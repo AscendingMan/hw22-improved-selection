@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityEditor.TerrainTools;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using ColorUtility = UnityEngine.ColorUtility;
@@ -24,10 +25,19 @@ public class SelectionBase : MonoBehaviour
             s_ChildHoverColor = Color.white; //new Color32(0xde, 0x58, 0xe0, 0xFF);
         }
     }
-    
+
+    enum SelectionState
+    {
+        HoverRoot,
+        HoverInContext,
+        HoverWithModifier,
+        SelectedItem
+    }
+
+    private SelectionState selectionState;
     private HoverState m_HoverState;
-    private bool m_UsingModifier = false;
-    private bool m_IsInContext = false;
+    private GameObject m_LastHovered;
+
     
     void OnEnable()
     {
@@ -61,158 +71,130 @@ public class SelectionBase : MonoBehaviour
         if (Selection.objects.Length == 0)
         {
             m_HoverState.Clear();
-            m_IsInContext = false;
+            selectionState = SelectionState.HoverRoot;
         }
 
-        if (m_HoverState.m_SibilingObjects != null && !m_HoverState.m_SibilingObjects.Contains(Selection.activeGameObject))
-        {
-            m_IsInContext = false;
-        }
+        m_HoverState.m_HoveredSibilingObject = null;
     }
     
-    void GetHoveredGameObject(Event currentEvent, bool ignoreSelection = true)
-    {
-        if(currentEvent.type == EventType.MouseMove)
-        {
-            GameObject[] ignoredObjects = new GameObject[]{};
-            var activeObj = Selection.activeGameObject;
-            var isUsingModifier = IsUsingModifiers(currentEvent);
-
-            if (activeObj && !m_IsInContext && !isUsingModifier && ignoreSelection)
-            {
-                ignoredObjects = activeObj.transform.root.GetComponentsInChildren<Transform>().Select(x => x.gameObject).ToArray();
-            }
-            
-            var hoveredGO = HandleUtility.PickGameObject(currentEvent.mousePosition, true, ignoredObjects);
-            if (hoveredGO == null)
-            {
-                m_HoverState.Clear();
-                return;
-            }
-
-            if (isUsingModifier)
-            {
-                m_HoverState.m_HoveredChildObject = hoveredGO;
-                m_HoverState.m_HoveredObjects.Clear();
-                m_UsingModifier = true;
-            }
-            else
-            {
-                m_HoverState.m_HoveredParentObject = hoveredGO.transform.root.gameObject;
-                m_HoverState.m_HoveredChildObject = null;
-                m_HoverState.m_HoveredObjects = hoveredGO.transform.root.GetComponentsInChildren<Transform>().Select(x => x.gameObject).ToList();
-                m_UsingModifier = false;
-            }
-
-            if (m_IsInContext && m_HoverState.m_SibilingObjects != null && m_HoverState.m_SibilingObjects.Contains(hoveredGO))
-            {
-                m_HoverState.m_HoveredSibilingObject = hoveredGO;
-                m_HoverState.m_HoveredObjects.Clear();
-            }
-            else if (m_IsInContext)
-            {
-                m_HoverState.m_HoveredSibilingObject = null;
-                m_HoverState.m_HoveredChildObject = null;
-            }
-        }
-    }
+    private float pulseTime = 0.0f;
     
     public void OnSceneGUISelectionHighlight(SceneView sceneView)
     {
-        Handles.color = Color.green;
-        
+        sceneView.autoRepaintOnSceneChange = true;
+
         var currentEvent = Event.current;
         if (currentEvent.type == EventType.Repaint)
         {
             if (m_HoverState.m_HoveredSibilingObject != null) 
-                Handles.DrawOutline(new []{m_HoverState.m_HoveredSibilingObject}, Color.cyan, 0.0f);
+                Handles.DrawOutline(new []{m_HoverState.m_HoveredSibilingObject}, Color.cyan, pulseTime);
             if (m_HoverState.m_HoveredChildObject != null)
-                Handles.DrawOutline(new []{m_HoverState.m_HoveredChildObject}, Styles.s_ChildHoverColor, 0.0f);
+                Handles.DrawOutline(new []{m_HoverState.m_HoveredChildObject}, Styles.s_ChildHoverColor, pulseTime);
             if(m_HoverState.m_HoveredObjects?.Count > 0) 
-                Handles.DrawOutline(m_HoverState.m_HoveredObjects, Styles.s_RootHoverColor, 0.0f);
+                Handles.DrawOutline(m_HoverState.m_HoveredObjects, Styles.s_RootHoverColor, pulseTime);
         }
-        
-        GetHoveredGameObject(currentEvent);
 
-        if (currentEvent.clickCount == 2 && currentEvent.type == EventType.MouseDown && currentEvent.button == 0 && currentEvent.isMouse &&
-            (m_HoverState.m_HoveredParentObject || m_HoverState.m_HoveredChildObject) && GUIUtility.hotControl != 0)
+        if (currentEvent.type == EventType.Layout || currentEvent.type == EventType.Repaint)
+            return;
+        
+        var hoveredGO = HandleUtility.PickGameObject(currentEvent.mousePosition, true);
+        // if (hoveredGO == m_LastHovered)
+        // {
+        //     pulseTime = Mathf.Sin(Time.realtimeSinceStartup * 10) * 0.25f;
+        //     EditorApplication.QueuePlayerLoopUpdate();
+        // }
+        // else
+        //     pulseTime = 0;
+
+        m_LastHovered = hoveredGO;
+        
+        if (currentEvent.type == EventType.MouseDown && currentEvent.button == 0)
         {
-            HandleDoubleClick(currentEvent);
+            if(currentEvent.clickCount == 2 || IsUsingModifiers(currentEvent))
+                selectionState = SelectionState.HoverInContext;
+            else
+                selectionState = SelectionState.SelectedItem;
+            
+            if (m_HoverState.m_SibilingObjects != null && !m_HoverState.m_SibilingObjects.Contains(hoveredGO))
+            {
+                m_HoverState.m_SibilingObjects?.Clear();
+            }
+        }
+        else if (currentEvent.type == EventType.MouseMove)
+        {
+            selectionState = IsUsingModifiers(currentEvent)
+                ? SelectionState.HoverWithModifier
+                : SelectionState.HoverRoot;
+        }
+
+        if (hoveredGO == null)
+        {
+            m_HoverState.Clear();
             return;
         }
-
-        if (currentEvent.type == EventType.MouseDown && currentEvent.button == 0 && currentEvent.isMouse && 
-            (m_HoverState.m_HoveredParentObject || m_HoverState.m_HoveredChildObject) && GUIUtility.hotControl != 0)
+        
+        Transform p;
+        // Handle states
+        switch (selectionState)
         {
-            if (m_UsingModifier)
-            {
-                m_IsInContext = true;
-                m_HoverState.m_SibilingObjects = new List<GameObject>();
-                Transform parent;
-                int childCount;
+            case SelectionState.HoverRoot:
+                
+                if (m_HoverState.m_SibilingObjects != null && m_HoverState.m_SibilingObjects.Contains(hoveredGO))
+                    m_HoverState.m_HoveredSibilingObject = hoveredGO;
+                
+                m_HoverState.m_HoveredParentObject = hoveredGO.transform.root.gameObject;
+                m_HoverState.m_HoveredChildObject = null;
+                m_HoverState.m_HoveredObjects = hoveredGO.transform.root.GetComponentsInChildren<Transform>().Select(x => x.gameObject).ToList();
+                m_HoverState.m_HoveredObjects.Remove(m_HoverState.m_HoveredSibilingObject);
 
-                if (m_HoverState.m_HoveredChildObject != null)
+                if (Selection.activeGameObject != null)
                 {
-                    Selection.activeInstanceID = m_HoverState.m_HoveredChildObject.GetInstanceID();
-                    parent = m_HoverState.m_HoveredChildObject.transform.parent;
-                    childCount = parent.transform.childCount;
-                }
-                else
-                {
-                    parent = m_HoverState.m_HoveredParentObject.transform;
-                    childCount = m_HoverState.m_HoveredParentObject.transform.childCount;
+                    p = Selection.activeGameObject.transform.parent;
+                    if (p == null)
+                    {
+                        for (int i = 0; i < Selection.activeGameObject.transform.childCount; i++)
+                        {
+                            m_HoverState.m_HoveredObjects.Remove(Selection.activeGameObject.transform.GetChild(i).gameObject);
+                        }
+                    }
+                    
+                    m_HoverState.m_HoveredObjects.Remove(Selection.activeGameObject);
                 }
                 
-                for (int i = 0; i < childCount; i++)
+                break;
+            case SelectionState.HoverWithModifier:
+                m_HoverState.m_HoveredParentObject = null;
+                m_HoverState.m_HoveredChildObject = hoveredGO;
+                m_HoverState.m_HoveredObjects?.Clear();
+                break;
+            case SelectionState.HoverInContext:
+                m_HoverState.m_SibilingObjects = new List<GameObject>();
+                Transform parent = hoveredGO.transform.parent;
+                if (parent != null)
                 {
-                    m_HoverState.m_SibilingObjects.Add(parent.GetChild(i).gameObject);
+                    for (int i = 0; i < parent.childCount; i++)
+                    {
+                        m_HoverState.m_SibilingObjects.Add(parent.GetChild(i).gameObject);
+                    }
                 }
-            }
-            else
-            {
-                if (m_IsInContext)
+                break;
+            case SelectionState.SelectedItem:
+                if (m_HoverState.m_SibilingObjects != null && m_HoverState.m_SibilingObjects.Contains(hoveredGO))
                 {
-                    m_IsInContext = false;
+                    Selection.activeGameObject = hoveredGO;
                 }
-                else if (m_HoverState.m_HoveredParentObject)
+                else if (m_HoverState.m_HoveredSibilingObject == null)
                 {
-                    Selection.activeInstanceID = m_HoverState.m_HoveredParentObject.GetInstanceID();
+                    m_HoverState.m_HoveredObjects = hoveredGO.transform.root.GetComponentsInChildren<Transform>().Select(x => x.gameObject).ToList();
+                    Selection.activeGameObject = hoveredGO.transform.root.gameObject;
                     int controlId = GUIUtility.GetControlID(FocusType.Passive);
                     GUIUtility.hotControl = controlId;
                     Event.current.Use();
                 }
-            }
+                break;
         }
     }
 
-    void HandleDoubleClick(Event currentEvent)
-    {
-        var hoveredGO = HandleUtility.PickGameObject(currentEvent.mousePosition, true);
-        if (hoveredGO == null)
-        {
-            m_HoverState.Clear();
-            m_IsInContext = false;
-            return;
-        }
-
-        var parent = hoveredGO.transform.parent;
-        if (parent != null)
-        {
-            m_IsInContext = true;
-            m_HoverState.m_SibilingObjects = new List<GameObject>();
-
-            for (int i = 0; i < parent.childCount; i++)
-            {
-                m_HoverState.m_SibilingObjects.Add(parent.GetChild(i).gameObject);
-            }
-        }
-        
-        Selection.activeInstanceID = hoveredGO.GetInstanceID();
-        int controlId = GUIUtility.GetControlID(FocusType.Passive);
-        GUIUtility.hotControl = controlId;
-        Event.current.Use();
-    }
-    
     bool IsUsingModifiers(Event evt)
     {
         if (evt.modifiers == EventModifiers.Control)
