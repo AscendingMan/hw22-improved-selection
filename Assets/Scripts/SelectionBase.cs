@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Unity.VisualScripting;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -43,7 +42,10 @@ public class SelectionBase : MonoBehaviour
     {
         if (!selectionRect.Contains(Event.current.mousePosition))
             return;
-                
+        
+        m_HoverState.m_HoveredChildObject = null;
+        m_HoverState.m_HoveredObjects?.Clear();
+        
         var go = EditorUtility.InstanceIDToObject(instanceID) as GameObject;
         if (!go)
             return;
@@ -68,15 +70,26 @@ public class SelectionBase : MonoBehaviour
         }
     }
     
-    void GetHoveredGameObject(Event currentEvent)
+    void GetHoveredGameObject(Event currentEvent, bool ignoreSelection = true)
     {
         if(currentEvent.type == EventType.MouseMove)
         {
-            var hoveredGO = HandleUtility.PickGameObject(currentEvent.mousePosition, true);
-            if (hoveredGO == null)
-                return;
-            
+            GameObject[] ignoredObjects = new GameObject[]{};
+            var activeObj = Selection.activeGameObject;
             var isUsingModifier = IsUsingModifiers(currentEvent);
+
+            if (activeObj && !m_IsInContext && !isUsingModifier && ignoreSelection)
+            {
+                ignoredObjects = activeObj.transform.root.GetComponentsInChildren<Transform>().Select(x => x.gameObject).ToArray();
+            }
+            
+            var hoveredGO = HandleUtility.PickGameObject(currentEvent.mousePosition, true, ignoredObjects);
+            if (hoveredGO == null)
+            {
+                m_HoverState.Clear();
+                return;
+            }
+
             if (isUsingModifier)
             {
                 m_HoverState.m_HoveredChildObject = hoveredGO;
@@ -106,9 +119,8 @@ public class SelectionBase : MonoBehaviour
     
     public void OnSceneGUISelectionHighlight(SceneView sceneView)
     {
-        if (!sceneView.hasFocus)
-            return;
-
+        Handles.color = Color.green;
+        
         var currentEvent = Event.current;
         if (currentEvent.type == EventType.Repaint)
         {
@@ -122,8 +134,15 @@ public class SelectionBase : MonoBehaviour
         
         GetHoveredGameObject(currentEvent);
 
+        if (currentEvent.clickCount == 2 && currentEvent.type == EventType.MouseDown && currentEvent.button == 0 && currentEvent.isMouse &&
+            (m_HoverState.m_HoveredParentObject || m_HoverState.m_HoveredChildObject) && GUIUtility.hotControl != 0)
+        {
+            HandleDoubleClick(currentEvent);
+            return;
+        }
+
         if (currentEvent.type == EventType.MouseDown && currentEvent.button == 0 && currentEvent.isMouse && 
-            (m_HoverState.m_HoveredParentObject || m_HoverState.m_HoveredChildObject))
+            (m_HoverState.m_HoveredParentObject || m_HoverState.m_HoveredChildObject) && GUIUtility.hotControl != 0)
         {
             if (m_UsingModifier)
             {
@@ -151,18 +170,52 @@ public class SelectionBase : MonoBehaviour
             }
             else
             {
-                m_IsInContext = false;
-                if (m_HoverState.m_HoveredParentObject)
+                if (m_IsInContext)
+                {
+                    m_IsInContext = false;
+                }
+                else if (m_HoverState.m_HoveredParentObject)
                 {
                     Selection.activeInstanceID = m_HoverState.m_HoveredParentObject.GetInstanceID();
+                    int controlId = GUIUtility.GetControlID(FocusType.Passive);
+                    GUIUtility.hotControl = controlId;
+                    Event.current.Use();
                 }
             }
         }
     }
 
+    void HandleDoubleClick(Event currentEvent)
+    {
+        var hoveredGO = HandleUtility.PickGameObject(currentEvent.mousePosition, true);
+        if (hoveredGO == null)
+        {
+            m_HoverState.Clear();
+            m_IsInContext = false;
+            return;
+        }
+
+        var parent = hoveredGO.transform.parent;
+        if (parent != null)
+        {
+            m_IsInContext = true;
+            m_HoverState.m_SibilingObjects = new List<GameObject>();
+
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                m_HoverState.m_SibilingObjects.Add(parent.GetChild(i).gameObject);
+            }
+        }
+        
+        Selection.activeInstanceID = hoveredGO.GetInstanceID();
+        int controlId = GUIUtility.GetControlID(FocusType.Passive);
+        GUIUtility.hotControl = controlId;
+        Event.current.Use();
+    }
+    
     bool IsUsingModifiers(Event evt)
     {
-        if (evt.modifiers == EventModifiers.Alt)
+        if (evt.modifiers == EventModifiers.Control)
             return true;
         
         // Don't use CTRL/CMD for now
