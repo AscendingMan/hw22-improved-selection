@@ -5,18 +5,20 @@ using UnityEngine;
 public class HoverState
 {
     public List<GameObject> m_HoveredObjects;
-    public List<GameObject> m_SibilingObjects;
-    public GameObject m_HoveredParentObject;
+    public List<GameObject> m_SiblingObjects;
     public GameObject m_HoveredChildObject;
-    public GameObject m_HoveredSibilingObject;
-    public bool m_IsContext;
+    public GameObject m_HoveredSiblingObject;
 
+    public HoverState()
+    {
+        m_SiblingObjects = new List<GameObject>();
+        m_HoveredObjects = new List<GameObject>();
+    }
+    
     public void Clear()
     {
         m_HoveredObjects?.Clear();
-        m_SibilingObjects?.Clear();
-        m_HoveredParentObject = null;
         m_HoveredChildObject = null;
-        m_HoveredSibilingObject = null;
+        m_HoveredSiblingObject = null;
     }
 }
