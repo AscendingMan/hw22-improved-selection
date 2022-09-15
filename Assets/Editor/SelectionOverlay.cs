@@ -1,19 +1,46 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using Unity.VisualScripting;
 using UnityEditor;
-using UnityEditor.SceneManagement;
-using UnityEditor.TerrainTools;
+using UnityEditor.Overlays;
+using UnityEditor.Toolbars;
 using UnityEngine;
-using UnityEngine.SceneManagement;
-using ColorUtility = UnityEngine.ColorUtility;
+using UnityEngine.UIElements;
 
-[ExecuteAlways]
-[ExecuteInEditMode]
-public class SelectionBase : MonoBehaviour
+[EditorToolbarElement(id, typeof(SceneView))]
+class SelectionOverlayEnabled : EditorToolbarToggle, IAccessContainerWindow
 {
+    public const string id = "ExampleToolbar/SelectionOverlayEnabled";
+    public EditorWindow containerWindow { get; set; }
+
+    SelectionOverlayEnabled()
+    {
+        icon = (Texture2D)EditorGUIUtility.IconContent("DotSelection", "").image;
+        value = true;
+        this.RegisterValueChangedCallback(ToggleImprovedSelectionEnabled);
+        
+        SceneView.duringSceneGui += OnSceneGUISelectionHighlight;
+        Selection.selectionChanged += OnSelectionChanged;
+        EditorApplication.hierarchyWindowItemOnGUI += HierarchyWindowItemOnGUI;
+        m_HoverState = new HoverState();
+        m_HierarchyWindow = Resources.FindObjectsOfTypeAll<EditorWindow>().FirstOrDefault(win => win.titleContent.text == "Hierarchy");
+    }
+
+    void OnWillBeDestroyed()
+    {
+        SceneView.duringSceneGui -= OnSceneGUISelectionHighlight;
+        Selection.selectionChanged -= OnSelectionChanged;
+        EditorApplication.hierarchyWindowItemOnGUI -= HierarchyWindowItemOnGUI;
+    }
+
+    private void ToggleImprovedSelectionEnabled(ChangeEvent<bool> evt)
+    {
+        if(value)
+            icon = (Texture2D)EditorGUIUtility.IconContent("DotSelection", "").image;
+        else
+            icon = (Texture2D)EditorGUIUtility.IconContent("DotFrameDotted", "").image;
+    }
+
     static class Styles
     {
         public static Color s_RootHoverColor;
@@ -25,6 +52,9 @@ public class SelectionBase : MonoBehaviour
             s_RootHoverColor = Color.yellow;
             s_ChildHoverColor = Color.white;
             s_ContextHoverColor = Color.cyan;
+            s_RootHoverColor.a = 0.75f;
+            s_ChildHoverColor.a = 0.75f;
+            s_ContextHoverColor.a = 0.75f;
         }
     }
 
@@ -41,16 +71,6 @@ public class SelectionBase : MonoBehaviour
     private GameObject m_LastHovered;
     private EditorWindow m_HierarchyWindow;
 
-    void OnEnable()
-    {
-        SceneView.duringSceneGui += OnSceneGUISelectionHighlight;
-        Selection.selectionChanged += OnSelectionChanged;
-        EditorApplication.hierarchyWindowItemOnGUI -= HierarchyWindowItemOnGUI;
-        EditorApplication.hierarchyWindowItemOnGUI += HierarchyWindowItemOnGUI;
-        m_HoverState = new HoverState();
-        m_HierarchyWindow = Resources.FindObjectsOfTypeAll<EditorWindow>().FirstOrDefault(win => win.titleContent.text == "Hierarchy");
-    }
-    
     private void HierarchyWindowItemOnGUI(int instanceID, Rect selectionRect)
     {
         if (!selectionRect.Contains(Event.current.mousePosition))
@@ -67,8 +87,6 @@ public class SelectionBase : MonoBehaviour
             m_HoverState.m_HoveredChildObject = go;
         else
             m_HoverState.m_HoveredObjects = new List<GameObject>(){go};
-        
-        Debug.Log(selectionRect);
     }
 
     void OnSelectionChanged()
@@ -86,31 +104,23 @@ public class SelectionBase : MonoBehaviour
     
     public void OnSceneGUISelectionHighlight(SceneView sceneView)
     {
-        sceneView.autoRepaintOnSceneChange = true;
-
+        if (!value)
+            return;
+        
+        pulseTime = Mathf.Cos(Time.realtimeSinceStartup * 4) * 0.15f + .05f;
+        
         var currentEvent = Event.current;
-        if (currentEvent.type == EventType.Repaint)
-        {
-            if (m_HoverState.m_HoveredSiblingObject != null) 
-                Handles.DrawOutline(new []{m_HoverState.m_HoveredSiblingObject}, Styles.s_ContextHoverColor, pulseTime);
-            if (m_HoverState.m_HoveredChildObject != null)
-                Handles.DrawOutline(new []{m_HoverState.m_HoveredChildObject}, Styles.s_ChildHoverColor, pulseTime);
-            if(m_HoverState.m_HoveredObjects?.Count > 0) 
-                Handles.DrawOutline(m_HoverState.m_HoveredObjects, Styles.s_RootHoverColor, pulseTime);
-        }
+        if (m_HoverState.m_HoveredSiblingObject != null && m_HoverState.m_HoveredSiblingObject == m_LastHovered) 
+            Handles.DrawOutline(new []{m_HoverState.m_HoveredSiblingObject}, Styles.s_ContextHoverColor, pulseTime);
+        if (m_HoverState.m_HoveredChildObject != null)
+            Handles.DrawOutline(new []{m_HoverState.m_HoveredChildObject}, Styles.s_ChildHoverColor, pulseTime);
+        if(m_HoverState.m_HoveredObjects?.Count > 0) 
+            Handles.DrawOutline(m_HoverState.m_HoveredObjects, Styles.s_RootHoverColor, pulseTime);
 
         if (currentEvent.type == EventType.Layout || currentEvent.type == EventType.Repaint)
             return;
         
         var hoveredGO = HandleUtility.PickGameObject(currentEvent.mousePosition, true);
-        // if (hoveredGO == m_LastHovered)
-        // {
-        //     pulseTime = Mathf.Sin(Time.realtimeSinceStartup * 10) * 0.25f;
-        //     EditorApplication.QueuePlayerLoopUpdate();
-        // }
-        // else
-        //     pulseTime = 0;
-
         m_LastHovered = hoveredGO;
         
         if (currentEvent.type == EventType.MouseDown && currentEvent.button == 0)
@@ -138,7 +148,6 @@ public class SelectionBase : MonoBehaviour
             return;
         }
         
-        Transform p;
         // Handle states
         switch (selectionState)
         {
@@ -217,5 +226,14 @@ public class SelectionBase : MonoBehaviour
         //     return true;
 
         return false;
+    }
+}
+
+[Overlay(typeof(SceneView), "Improved Selection", defaultDockZone = DockZone.TopToolbar, defaultDockPosition = DockPosition.Top)]
+public class SelectionOverlay : ToolbarOverlay
+{
+    SelectionOverlay() : base(
+        SelectionOverlayEnabled.id)
+    {
     }
 }
