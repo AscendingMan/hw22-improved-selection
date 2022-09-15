@@ -110,7 +110,7 @@ class SelectionOverlayEnabled : EditorToolbarToggle, IAccessContainerWindow
         pulseTime = Mathf.Cos(Time.realtimeSinceStartup * 4) * 0.15f + .05f;
         
         var currentEvent = Event.current;
-        if (m_HoverState.m_HoveredSiblingObject != null && m_HoverState.m_HoveredSiblingObject == m_LastHovered) 
+        if (m_HoverState.m_HoveredSiblingObject != null && m_HoverState.m_HoveredSiblingObject == m_LastHovered && Selection.activeGameObject != m_HoverState.m_HoveredSiblingObject) 
             Handles.DrawOutline(new []{m_HoverState.m_HoveredSiblingObject}, Styles.s_ContextHoverColor, pulseTime);
         if (m_HoverState.m_HoveredChildObject != null)
             Handles.DrawOutline(new []{m_HoverState.m_HoveredChildObject}, Styles.s_ChildHoverColor, pulseTime);
@@ -130,6 +130,7 @@ class SelectionOverlayEnabled : EditorToolbarToggle, IAccessContainerWindow
             else
                 selectionState = SelectionState.SelectedItem;
             
+            m_HoverState.m_HoveredObjects.Clear();
             if (m_HoverState.m_SiblingObjects != null && !m_HoverState.m_SiblingObjects.Contains(hoveredGO))
             {
                 m_HoverState.m_SiblingObjects?.Clear();
@@ -176,7 +177,8 @@ class SelectionOverlayEnabled : EditorToolbarToggle, IAccessContainerWindow
                 }
                 break;
             case SelectionState.HoverWithModifier:
-                m_HoverState.m_HoveredChildObject = hoveredGO;
+                if (Selection.activeGameObject != hoveredGO)
+                    m_HoverState.m_HoveredChildObject = hoveredGO;
                 m_HoverState.m_HoveredObjects?.Clear();
                 break;
             case SelectionState.HoverInContext:
@@ -204,7 +206,6 @@ class SelectionOverlayEnabled : EditorToolbarToggle, IAccessContainerWindow
                 }
                 else if (m_HoverState.m_HoveredSiblingObject == null)
                 {
-                    m_HoverState.m_HoveredObjects = hoveredGO.transform.root.GetComponentsInChildren<Transform>().Select(x => x.gameObject).ToList();
                     Selection.activeGameObject = hoveredGO.transform.root.gameObject;
                     int controlId = GUIUtility.GetControlID(FocusType.Passive);
                     GUIUtility.hotControl = controlId;
